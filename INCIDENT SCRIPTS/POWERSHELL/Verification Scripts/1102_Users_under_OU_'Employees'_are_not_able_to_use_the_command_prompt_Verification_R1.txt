@@ -1,0 +1,90 @@
+####			                Incident Verification			                ####
+#### @Incident Description    : Users under OU 'Employees' are not able to use the command prompt #### 
+#### @Root cause	          : Group policy is applied ####
+#### @Author                  : Vansh Kalra ####
+#### @Date(DD/MM/YYYY)        : 13/03/2024 #### 
+
+#### Hashtable, for mapping unique keys to values and storing values #### 
+$output = @{}
+#### $inputhash is .Net variable to take dynamic values ####
+$ouName = $inputhash.ouName
+$gpoName = $inputhash.gpoName
+######Checking the Mandatory inputs is present or not #####
+$inputs=@{'ouName'=$ouName; 'gpoName'=$gpoName}
+Get-MandatVars -Inputs $inputs -MandatInputs @('ouName', 'gpoName')
+Send-Feedback -FbPercent 20 -FbMsg "Mandatory inputs collected"
+Write-Log -LogLevel 4 -LogMsg "Checked mandatory inputs"
+#### To get the completion Percentage and feedback which can be viewed by customer ####
+$completionPer=0;
+$feedback="Verified";
+$result="";
+
+#### Start of try block ####
+try {
+	$domainName = $env:USERDNSDOMAIN   #### "asimlab.com" ####
+	$path = "C:\GPOReport.xml" 
+	$gpoReport = Get-GPOReport -Name $gpoName -Domain $domainName -ReportType Xml -Path $path
+	[xml]$xml = Get-Content -Path $path
+	$state = $xml.GPO.Computer.Enabled
+	
+	if($state -eq "false")
+	{
+		$retDesc = "#@#RESULT#@#SUCCESS#@#"
+		$retCode = 0
+		$completionPer=100;
+		$feedback="$feedback, group policy $gpoName is disabled. Hence, the incident is fixed."
+		Write-Log -LogLevel 4 -LogMsg "Group policy $gpoName disabled"
+		Send-Feedback -FbPercent 100 -FbMsg "Group policy $gpoName is disabled"
+		$result = "Incident is fixed, as the group policy $gpoName is disabled"
+	}
+	
+	else
+	{
+		#### Getting the OU details ####	
+		$ouDetails = Get-ADOrganizationalUnit -Filter {Name -eq $ouName}
+		#### Getting the GPO that is linked to the OU ####
+		$gpoLinkedToOu = ((Get-GPInheritance -Target $ouDetails).GpoLinks) | Where-Object {$_.DisplayName -eq $gpoName}
+		
+		if($gpoLinkedToOu -eq $null){
+			$retDesc = "#@#RESULT#@#SUCCESS#@#"
+			$retCode = 0
+			$completionPer=100;
+			$feedback="$feedback, group policy $gpoName is not linked to the OU $ouName. Hence, the incident is fixed."
+			Write-Log -LogLevel 4 -LogMsg "Group policy $gpoName is not linked to the OU $ouName"
+			Send-Feedback -FbPercent 100 -FbMsg "Group policy $gpoName is not linked to the OU $ouName"
+			$result = "Incident is fixed, as the group policy $gpoName is not linked to the OU $ouName"
+		}
+	
+		else{
+			$retDesc="#@#RESULT#@#FAILURE#@#"
+			$retCode=1
+			$completionPer=0;
+			$feedback="$feedback, group policy $gpoName is linked to the OU $ouName. So, the incident is not fixed."
+			Write-Log -LogLevel 4 -LogMsg "Group policy $gpoName is linked to the OU $ouName"
+			Send-Feedback -FbPercent 100 -FbMsg "Group policy $gpoName is linked to the OU $ouName"
+			$result = "The group policy $gpoName is linked to the OU $ouName, hence the indident is not resolved"
+		}
+		
+	}
+	
+	$output.Add("result",$result)
+	$output.Add("completionPercentage", $completionPer)
+	$output.Add("feedback",$feedback)
+	Send-Output -RetCode $retCode -RetDesc $retDesc -Output $output
+}
+#### End of try block ####
+
+#### Start of catch block ####
+catch {
+    $retCode = 1
+    $retDesc = "#@#RESULT#@#FAILURE#@#"
+    $feedback="Error while executing the Incident script!"
+    $ErrorMessage = $_.Exception.Message
+    $output.Add("result","$ErrorMessage")
+	$output.Add("completionPercentage", $completionPer)
+    $output.Add("feedback",$feedback)
+    Write-Log -LogLevel 4 -LogMsg "Script Run Failed"
+	Send-Feedback -FbPercent 100 -FbMsg "Incident script Run Failed"
+    Send-Output -RetCode $retCode -RetDesc $retDesc -Output $output
+}
+#### End of catch block ####

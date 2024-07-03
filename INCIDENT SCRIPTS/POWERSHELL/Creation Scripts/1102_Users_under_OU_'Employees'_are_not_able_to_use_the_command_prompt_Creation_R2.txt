@@ -1,0 +1,75 @@
+####			                Incident Creation			                ####
+#### @Incident Description    : Users under OU 'Employees' are not able to use the command prompt #### 
+#### @Incident Prerequisites  : OU 'Employees' should exist ####
+#### @Root cause	          : Command prompt is disabled for users under OU, using Access Control List ####
+#### @Author                  : Vansh Kalra ####
+#### @Date(DD/MM/YYYY)        : 10/04/2024 #### 
+
+#### Hashtable, for mapping unique keys to values and storing values #### 
+$output = @{}
+#### $inputhash is .Net variable to take dynamic values ####
+$ouName = $inputhash.ouName
+######Checking the Mandatory inputs is present or not #####
+$inputs=@{'ouName'=$ouName}
+Get-MandatVars -Inputs $inputs -MandatInputs @('ouName')
+Send-Feedback -FbPercent 20 -FbMsg "Mandatory inputs collected"
+Write-Log -LogLevel 4 -LogMsg "Checked mandatory inputs"
+$result=""
+
+#### Start of try block ####
+try {
+	$ouDetails = Get-ADOrganizationalUnit -Filter {Name -eq $ouName}
+	
+	#### Check if the OU exists ###
+	if ($ouDetails -eq $null) {
+		#### OU doesn't exist, create it ####
+		New-ADOrganizationalUnit -Name $ouName -Path "DC=$env:USERDOMAIN,DC=com"
+		Send-Feedback -FbPercent 30 -FbMsg "The OU $ouName does not exist so, the script created the OU"
+		Write-Log -logLevel 4 -logMsg "The OU $ouName does not exist so, the script created the OU"
+		$result = "The script created the OU $ouName as the OU did not exist. "
+	}
+	
+	else {
+		#### OU already exists ####
+		Send-Feedback -FbPercent 30 -FbMsg "The OU $ouName already exists"
+		Write-Log -logLevel 4 -logMsg "The OU $ouName already exists"
+		$result = "The OU $ouName already exists. "
+	}
+
+	#### Path to the Command Prompt executable ####
+	$cmdPath = "$env:SystemRoot\System32\cmd.exe"
+	#### Get the current ACL for the Command Prompt executable ####
+	$acl = Get-Acl -Path $cmdPath
+	#### Getting the details of all the users under the OU ####
+	$users = Get-ADUser -Filter * -SearchBase $ouDetails.DistinguishedName
+	
+	#### Define the rule to deny access to Command Prompt for all users in the OU ####
+	foreach ($user in $users) {
+		$username = $user.SamAccountName
+		$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($username, "ReadAndExecute", "Deny")
+		$acl.AddAccessRule($rule)
+	}
+	
+	#### Apply the modified ACL to the Command Prompt executable ####
+	Set-Acl -Path $cmdPath -AclObject $acl
+	Send-Feedback -FbPercent 100 -FbMsg "Command prompt has been disabled for employees under OU $ouName by applying the rule and modifying the Access control list. Hence, the incident is created"
+	Write-Log -logLevel 4 -logMsg "Command prompt has been disabled for employees under OU $ouName by applying the rule and modifying the Access control list. Hence, the incident is created"
+	$result = "$result Command prompt has been disabled for employees under OU $ouName by applying the rule and modifying the Access control list. Hence, the incident is created"
+	$retDesc="#@#RESULT#@#SUCCESS#@#"
+	$retCode=0
+	$output.Add("result",$result)              
+	Send-Output -RetCode $retCode -RetDesc $retDesc -Output $output
+}
+#### End of try block ####
+
+#### Start of catch block ####
+catch {
+    $retCode = 1
+    $retDesc = "#@#RESULT#@#FAILURE#@#"
+    $ErrorMessage = $_.Exception.Message
+    $output.Add("result","$ErrorMessage")
+    Send-Feedback -FbPercent 100 -FbMsg "Script Run Failed"
+    Write-Log -LogLevel 4 -LogMsg "Script Run Failed"
+    Send-Output -RetCode $retCode -RetDesc $retDesc -output $output
+}
+#### End of catch block ####

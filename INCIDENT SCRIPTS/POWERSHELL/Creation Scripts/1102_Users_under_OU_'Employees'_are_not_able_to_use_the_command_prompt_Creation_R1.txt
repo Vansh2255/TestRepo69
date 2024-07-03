@@ -1,0 +1,71 @@
+####			                Incident Creation			                ####
+#### @Incident Description    : Users under OU 'Employees' are not able to use the command prompt #### 
+#### @Incident Prerequisites  : OU 'Employees' should exist ####
+#### @Root cause	          : Group policy is applied ####
+#### @Author                  : Vansh Kalra ####
+#### @Date(DD/MM/YYYY)        : 13/03/2024 #### 
+
+#### Hashtable, for mapping unique keys to values and storing values #### 
+$output = @{}
+#### $inputhash is .Net variable to take dynamic values ####
+$ouName = $inputhash.ouName
+$gpoName = $inputhash.gpoName
+######Checking the Mandatory inputs is present or not #####
+$inputs=@{'ouName'=$ouName; 'gpoName'=$gpoName}
+Get-MandatVars -Inputs $inputs -MandatInputs @('ouName', 'gpoName')
+Send-Feedback -FbPercent 20 -FbMsg "Mandatory inputs collected"
+Write-Log -LogLevel 4 -LogMsg "Checked mandatory inputs"
+$result=""
+
+#### Start of try block ####
+try {
+	$ouDetails = Get-ADOrganizationalUnit -Filter {Name -eq $ouName}
+	
+	#### Check if the OU exists ###
+	if ($ouDetails -eq $null) {
+		#### OU doesn't exist, create it ####
+		New-ADOrganizationalUnit -Name $ouName -Path "DC=$env:USERDOMAIN,DC=com"
+		Send-Feedback -FbPercent 30 -FbMsg "The OU $ouName does not exist so, the script created the OU"
+		Write-Log -logLevel 4 -logMsg "The OU $ouName does not exist so, the script created the OU"
+		$result = "The script created the OU $ouName as the OU did not exist. "
+	}
+	
+	else {
+		#### OU already exists ####
+		Send-Feedback -FbPercent 30 -FbMsg "The OU $ouName already exists"
+		Write-Log -logLevel 4 -logMsg "The OU $ouName already exists"
+		$result = "The OU $ouName already exists. "
+	}
+
+	#### Creating the group policy ####
+	New-GPO -Name $gpoName -Domain $env:USERDNSDOMAIN
+	#### Setting the registry key value for the group policy in order to configure the group policy ####
+	Set-GPRegistryValue -Name $gpoName -Key "HKCU\Software\Policies\Microsoft\Windows\System" -ValueName DisableCMD -Type DWORD -Value 1
+	#### Getting the DistinguishedName of the OU ####
+	$ouDetails = Get-ADOrganizationalUnit -Filter {Name -eq $ouName}
+	$ouDn = ($ouDetails).DistinguishedName
+	#### Linking the group policy to the user container ####
+	New-GPLink -Name $gpoName -Target $ouDn
+	#### Force a refresh of Group Policy settings on a local computer ####
+	gpupdate /force
+	Send-Feedback -FbPercent 100 -FbMsg "Command prompt has been disabled by applying the group policy $gpoName. Hence, the incident is created"
+	Write-Log -logLevel 4 -logMsg "Command prompt has been disabled by applying the group policy $gpoName. Hence, the incident is created"
+	$result = "$result Command prompt has been disabled by applying the group policy $gpoName. Hence, the incident is created"
+	$retDesc="#@#RESULT#@#SUCCESS#@#"
+	$retCode=0
+	$output.Add("result",$result)              
+	Send-Output -RetCode $retCode -RetDesc $retDesc -Output $output
+}
+#### End of try block ####
+
+#### Start of catch block ####
+catch {
+    $retCode = 1
+    $retDesc = "#@#RESULT#@#FAILURE#@#"
+    $ErrorMessage = $_.Exception.Message
+    $output.Add("result","$ErrorMessage")
+    Send-Feedback -FbPercent 100 -FbMsg "Script Run Failed"
+    Write-Log -LogLevel 4 -LogMsg "Script Run Failed"
+    Send-Output -RetCode $retCode -RetDesc $retDesc -output $output
+}
+#### End of catch block ####
